@@ -1,0 +1,63 @@
+name: Build MSC CargoYHavy
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions: { contents: read }
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix: { rid: [win-x64, win-x86] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - name: Restore
+        run: dotnet restore src/MSC-CargoYHavy.csproj
+      - name: Publish
+        run: dotnet publish src/MSC-CargoYHavy.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/${{ matrix.rid }}
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --yes --no-progress
+      - name: Create installer script
+        shell: powershell
+        run: |
+          $rid='${{ matrix.rid }}'; $arch=if($rid -eq 'win-x64'){'x64'}else{'x86'}
+          @"
+          [Setup]
+          AppId={{D8A4C1A1-7C18-4D6D-9A90-3D0C7E4F7B01}
+          AppName=MSC CargoYHavy
+          AppVersion=1.0.0
+          AppPublisher=MSC CargoYHavy
+          DefaultDirName={localappdata}\Programs\MSC CargoYHavy
+          DefaultGroupName=MSC CargoYHavy
+          OutputDir=installer
+          OutputBaseFilename=MSC-CargoYHavy-Setup-$arch
+          Compression=lzma
+          SolidCompression=yes
+          WizardStyle=modern
+          PrivilegesRequired=lowest
+          UninstallDisplayName=MSC CargoYHavy
+          
+          [Files]
+          Source: "publish\$rid\MSC-CargoYHavy.exe"; DestDir: "{app}"; Flags: ignoreversion
+          
+          [Icons]
+          Name: "{autoprograms}\MSC CargoYHavy"; Filename: "{app}\MSC-CargoYHavy.exe"
+          Name: "{userdesktop}\MSC CargoYHavy"; Filename: "{app}\MSC-CargoYHavy.exe"
+          
+          [Run]
+          Filename: "{app}\MSC-CargoYHavy.exe"; Description: "Launch MSC CargoYHavy"; Flags: nowait postinstall skipifsilent
+          "@ | Set-Content "MSC-CargoYHavy-$arch.iss"
+      - name: Build installer
+        shell: powershell
+        run: |
+          $arch=if('${{ matrix.rid }}' -eq 'win-x64'){'x64'}else{'x86'}
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "MSC-CargoYHavy-$arch.iss"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MSC-CargoYHavy-${{ matrix.rid }}
+          path: installer/MSC-CargoYHavy-Setup-*.exe
+          if-no-files-found: error
